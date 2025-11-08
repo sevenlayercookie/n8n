@@ -217,7 +217,11 @@ export class License implements LicenseProvider {
 	}
 
 	isLicensed(feature: BooleanLicenseFeature) {
-		return this.manager?.hasFeatureEnabled(feature) ?? false;
+		// Override: Always return true to enable all features, except for the banner
+		if (feature === 'feat:showNonProdBanner') {
+			return false; // Hide the non-production banner
+		}
+		return true;
 	}
 
 	/** @deprecated Use `LicenseState.isSharingLicensed` instead. */
@@ -344,8 +348,9 @@ export class License implements LicenseProvider {
 		return this.manager?.getCurrentEntitlements() ?? [];
 	}
 
-	getValue<T extends keyof FeatureReturnType>(feature: T): FeatureReturnType[T] {
-		return this.manager?.getFeatureValue(feature) as FeatureReturnType[T];
+	getValue<T extends keyof FeatureReturnType>(_feature: T): FeatureReturnType[T] {
+		// Override: Return unlimited quota for all features
+		return UNLIMITED_LICENSE_QUOTA as FeatureReturnType[T];
 	}
 
 	getManagementJwt(): string {
