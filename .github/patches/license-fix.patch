@@ -1,0 +1,21 @@
+diff --git a/packages/cli/src/license.ts b/packages/cli/src/license.ts
+index 1bb5100fc7..0ed31b5a95 100644
+--- a/packages/cli/src/license.ts
++++ b/packages/cli/src/license.ts
+@@ -216,9 +216,13 @@ export class License implements LicenseProvider {
+ 		this.logger.debug('License shut down');
+ 	}
+ 
+-	isLicensed(feature: BooleanLicenseFeature) {
+-		return this.manager?.hasFeatureEnabled(feature) ?? false;
+-	}
++    isLicensed(feature: BooleanLicenseFeature) {
++        // Override: Always return true to enable all features, except for the banner
++        if (feature === 'feat:showNonProdBanner') {
++            return false; // Hide the non-production banner
++        }
++        return true;
++    }
+ 
+ 	/** @deprecated Use `LicenseState.isSharingLicensed` instead. */
+ 	isSharingEnabled() {
