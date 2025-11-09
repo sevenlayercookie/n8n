@@ -1,0 +1,200 @@
+name: Build Patched n8n - check first
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  #=============================================================
+  # JOB 1: CHECK FOR UPSTREAM CHANGES
+  #=============================================================
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      # We will output both the build flag AND the new commit SHA
+      needs_build: ${{ steps.check_build.outputs.needs_build }}
+      new_sha: ${{ steps.check_build.outputs.new_sha }}
+
+    steps:
+      - name: Checkout your fork
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0 # Required for rebase
+
+      - name: Get commit SHA before sync
+        id: sha_before
+        run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Sync with Upstream and Rebase
+        # NEW: Added robust error handling for rebase conflicts
+        id: rebase
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git remote add upstream https://github.com/n8n-io/n8n.git
+          git fetch upstream
+          
+          echo "Attempting to rebase 'master' on 'upstream/master'..."
+          if ! git rebase upstream/master master; then
+            echo "::error::Automatic rebase failed! This is likely due to a conflict"
+            echo "::error::between your patch and upstream changes. Please rebase locally."
+            git rebase --abort
+            # This 'exit 1' will fail the job and prevent the build
+            exit 1
+          fi
+          echo "Rebase successful."
+
+      - name: Get commit SHA after sync
+        id: sha_after
+        run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Check for changes and push if needed
+        id: check_build
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.sha_before.outputs.sha }}" == "${{ steps.sha_after.outputs.sha }}" ]; then
+            echo "Upstream has not changed. No build needed."
+            echo "needs_build=false" >> $GITHUB_OUTPUT
+            echo "new_sha=none" >> $GITHUB_OUTPUT
+          else
+            echo "Upstream has changed. Build is required."
+            echo "needs_build=true" >> $GITHUB_OUTPUT
+            
+            echo "Forcing push of new history to 'master' branch..."
+            git push origin master --force
+            
+            # NEW: Output the exact SHA we just pushed
+            echo "new_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          fi
+
+  #=============================================================
+  # JOB 2: BUILD AND PUSH (ONLY IF NEEDED)
+  #=============================================================
+  build-and-push:
+    needs: check
+    if: needs.check.outputs.needs_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # --- 1. SETUP: Log in to Docker Registries ---
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # --- 2. CODE: Checkout synced code and apply patch ---
+      - name: Checkout your fork
+        uses: actions/checkout@v4
+        with:
+          # NEW: Check out the EXACT commit SHA from the 'check' job.
+          # This 100% eliminates any push/checkout race condition.
+          ref: ${{ needs.check.outputs.new_sha }}
+
+      - name: Apply Custom Patch
+        # NEW: Use 'git apply' for both checking and applying
+        run: |
+          set -euo pipefail
+          PATCH_FILE=".github/patches/license-fix.patch"
+          
+          echo "Checking if patch can be applied cleanly..."
+          if ! git apply --check "${PATCH_FILE}"; then
+            echo "::error::Patch validation failed ('git apply --check')!"
+            echo "::error::This shouldn't happen if the rebase succeeded. Investigate."
+            exit 1
+          fi
+          
+          echo "Applying patch..."
+          git apply "${PATCH_FILE}"
+          echo "Patch applied successfully."
+
+      # --- 3. BUILD: Set up environment and build app ---
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 10.18.3 
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22 
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build n8n application
+        run: pnpm run build:n8n
+
+      # --- 4. PUBLISH: Define tags and push image ---
+      - name: Define Docker Tags
+        id: meta
+        run: |
+          set -euo pipefail
+          
+          # This robust version from ChatGPT is a good idea
+          VERSION=$(node -e "
+            const fs=require('fs');
+            for (const f of ['package.json','packages/cli/package.json']) {
+              if (fs.existsSync(f)) { console.log(require('./'+f).version); process.exit(0); }
+            }
+            console.error('Could not find package.json');
+            process.exit(1);
+          ")
+          echo "Version found: ${VERSION}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+
+          TAGS=$(cat <<EOF
+          ${{ secrets.DOCKER_USERNAME }}/${{ vars.DOCKER_REPO }}:${VERSION}
+          ${{ secrets.DOCKER_USERNAME }}/${{ vars.DOCKER_REPO }}:latest
+          ghcr.io/${REPO_LC}:${VERSION}
+          ghcr.io/${REPO_LC}:latest
+          EOF
+          )
+          
+          echo "Building tags:"
+          echo "${TAGS}"
+          echo "tags<<EOF" >> $GITHUB_OUTPUT
+          echo "${TAGS}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/images/n8n/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_VERSION=22.21.0
+            N8N_VERSION=${{ steps.meta.outputs.version }}
+            N8N_RELEASE_TYPE=stable
