@@ -85,7 +85,7 @@ jobs:
         run: pnpm run build:n8n
 
       # --- 4. PUBLISH: Define tags and push image ---
-      - name: Define Docker Tags  
+      - name: Define Docker Tags
         id: meta
         run: |
           # Read the version from the package.json we just synced
