@@ -22,13 +22,14 @@ jobs:
       # We will output both the build flag AND the new commit SHA
       needs_build: ${{ steps.check_build.outputs.needs_build }}
       new_sha: ${{ steps.check_build.outputs.new_sha }}
-
     steps:
       - name: Checkout your fork
         uses: actions/checkout@v4
         with:
           ref: master
           fetch-depth: 0 # Required for rebase
+          # This uses your new PAT
+          token: ${{ secrets.PAT }} 
 
       - name: Get commit SHA before sync
         id: sha_before
