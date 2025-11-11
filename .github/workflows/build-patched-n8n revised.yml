@@ -18,6 +18,7 @@ jobs:
   # JOB 1: CHECK FOR UPSTREAM CHANGES
   #=============================================================
   check:
+    permissions: write-all
     runs-on: ubuntu-latest
     outputs:
       # We will output both the build flag AND the new commit SHA
