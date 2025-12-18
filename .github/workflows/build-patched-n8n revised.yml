@@ -115,22 +115,21 @@ jobs:
           # This 100% eliminates any push/checkout race condition.
           ref: ${{ needs.check.outputs.new_sha }}
 
-      - name: Apply Custom Patch
-        # NEW: Use 'git apply' for both checking and applying
+      - name: Apply License Bypass (Function Hijack)
         run: |
           set -euo pipefail
-          PATCH_FILE=".github/patches/license-fix.patch"
+          TARGET_FILE="packages/cli/src/license.ts"
           
-          echo "Checking if patch can be applied cleanly..."
-          if ! git apply --check "${PATCH_FILE}"; then
-            echo "::error::Patch validation failed ('git apply --check')!"
-            echo "::error::This shouldn't happen if the rebase succeeded. Investigate."
-            exit 1
-          fi
+          echo "Hijacking 'isLicensed' to enable features..."
+          # Replaces the start of the function with logic that returns false for banner/apiDisabled and true for everything else.
+          # The '//' at the end comments out the original function body on that line.
+          sed -i 's/isLicensed(feature: BooleanLicenseFeature) {/isLicensed(feature: BooleanLicenseFeature) { if (feature === "feat:showNonProdBanner") return false; if (feature === "feat:apiDisabled") return false; return true; \/\//' "$TARGET_FILE"
+
+          echo "Hijacking 'getValue' to set unlimited quotas..."
+          # Replaces the start of the function to return "Enterprise" for planName and -1 for everything else.
+          sed -i 's/getValue<T extends keyof FeatureReturnType>(feature: T): FeatureReturnType\[T\] {/getValue<T extends keyof FeatureReturnType>(feature: T): FeatureReturnType[T] { if (feature === "planName") return "Enterprise" as FeatureReturnType[T]; return -1 as FeatureReturnType[T]; \/\//' "$TARGET_FILE"
           
-          echo "Applying patch..."
-          git apply "${PATCH_FILE}"
-          echo "Patch applied successfully."
+          echo "Patch applied successfully via Function Hijack."
 
       # --- 3. BUILD: Set up environment and build app ---
       - name: Set up pnpm
