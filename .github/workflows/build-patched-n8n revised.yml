@@ -36,23 +36,34 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
       - name: Sync with Upstream and Rebase
-        # NEW: Added robust error handling for rebase conflicts
+        # Auto-skips legacy workflow cleanup commit if it conflicts during rebase
         id: rebase
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
+
+          git remote remove upstream >/dev/null 2>&1 || true
           git remote add upstream https://github.com/n8n-io/n8n.git
           git fetch upstream
-          
+
           echo "Attempting to rebase 'master' on 'upstream/master'..."
           if ! git rebase upstream/master master; then
-            echo "::error::Automatic rebase failed! This is likely due to a conflict"
-            echo "::error::between your patch and upstream changes. Please rebase locally."
-            git rebase --abort
-            # This 'exit 1' will fail the job and prevent the build
-            exit 1
+            if [ -f .git/rebase-merge/message ]; then
+              REBASE_MSG="$(cat .git/rebase-merge/message)"
+            else
+              REBASE_MSG=""
+            fi
+
+            if [[ "$REBASE_MSG" == "chore: keep only patched workflow"* ]]; then
+              echo "Detected legacy workflow-cleanup commit conflict; skipping it..."
+              git rebase --skip
+            else
+              echo "::error::Automatic rebase failed with an unhandled conflict."
+              echo "::error::Please resolve this rebase conflict locally."
+              git rebase --abort
+              exit 1
+            fi
           fi
           echo "Rebase successful."
 
