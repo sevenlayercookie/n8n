@@ -60,11 +60,27 @@ jobs:
         id: sha_after
         run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
+      - name: Keep only this workflow file
+        id: prune_workflows
+        run: |
+          set -euo pipefail
+          KEEP_WORKFLOW="build-patched-n8n revised.yml"
+          WORKFLOW_DIR=".github/workflows"
+
+          find "$WORKFLOW_DIR" -maxdepth 1 -type f ! -name "$KEEP_WORKFLOW" -delete
+
+          if ! git diff --quiet -- "$WORKFLOW_DIR"; then
+            git add "$WORKFLOW_DIR"
+            git commit -m "chore: keep only patched workflow in fork"
+          fi
+
       - name: Check for changes and push if needed
         id: check_build
         run: |
           set -euo pipefail
-          if [ "${{ steps.sha_before.outputs.sha }}" == "${{ steps.sha_after.outputs.sha }}" ]; then
+          CURRENT_SHA="$(git rev-parse HEAD)"
+
+          if [ "${{ steps.sha_before.outputs.sha }}" == "$CURRENT_SHA" ]; then
             echo "Upstream has not changed. No build needed."
             echo "needs_build=false" >> $GITHUB_OUTPUT
             echo "new_sha=none" >> $GITHUB_OUTPUT
@@ -76,7 +92,7 @@ jobs:
             git push origin master --force
             
             # NEW: Output the exact SHA we just pushed
-            echo "new_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+            echo "new_sha=$CURRENT_SHA" >> $GITHUB_OUTPUT
           fi
 
   #=============================================================
