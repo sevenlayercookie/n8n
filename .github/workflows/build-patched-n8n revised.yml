@@ -48,23 +48,28 @@ jobs:
           git fetch upstream
 
           echo "Attempting to rebase 'master' on 'upstream/master'..."
-          if ! git rebase upstream/master master; then
-            if [ -f .git/rebase-merge/message ]; then
-              REBASE_MSG="$(cat .git/rebase-merge/message)"
-            else
-              REBASE_MSG=""
+          rebase_status=0
+          git rebase upstream/master master || rebase_status=$?
+
+          while [ "$rebase_status" -ne 0 ]; do
+            if [ ! -d .git/rebase-merge ] && [ ! -d .git/rebase-apply ]; then
+              echo "::error::Rebase failed without leaving a recoverable rebase state."
+              exit "$rebase_status"
             fi
+
+            REBASE_MSG="$(git show -s --format=%s REBASE_HEAD 2>/dev/null || true)"
 
             if [[ "$REBASE_MSG" == "chore: keep only patched workflow"* ]]; then
               echo "Detected legacy workflow-cleanup commit conflict; skipping it..."
-              git rebase --skip
+              rebase_status=0
+              git rebase --skip || rebase_status=$?
             else
-              echo "::error::Automatic rebase failed with an unhandled conflict."
+              echo "::error::Automatic rebase failed with an unhandled conflict in: $REBASE_MSG"
               echo "::error::Please resolve this rebase conflict locally."
               git rebase --abort
               exit 1
             fi
-          fi
+          done
           echo "Rebase successful."
 
       - name: Get commit SHA after sync
