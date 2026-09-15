@@ -24,7 +24,7 @@ jobs:
       new_sha: ${{ steps.check_build.outputs.new_sha }}
     steps:
       - name: Checkout your fork
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: master
           fetch-depth: 0 # Required for rebase
@@ -141,39 +141,26 @@ jobs:
 
       # --- 2. CODE: Checkout synced code and apply patch ---
       - name: Checkout your fork
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # NEW: Check out the EXACT commit SHA from the 'check' job.
           # This 100% eliminates any push/checkout race condition.
           ref: ${{ needs.check.outputs.new_sha }}
 
-      - name: Apply License Bypass (Function Hijack)
-        run: |
-          set -euo pipefail
-          TARGET_FILE="packages/cli/src/license.ts"
-          
-          echo "Hijacking 'isLicensed' to enable features..."
-          # Replaces the start of the function with logic that returns false for banner/apiDisabled and true for everything else.
-          # The '//' at the end comments out the original function body on that line.
-          sed -i 's/isLicensed(feature: BooleanLicenseFeature) {/isLicensed(feature: BooleanLicenseFeature) { if (feature === "feat:showNonProdBanner") return false; if (feature === "feat:apiDisabled") return false; return true; \/\//' "$TARGET_FILE"
-
-          echo "Hijacking 'getValue' to set unlimited quotas..."
-          # Replaces the start of the function to return "Enterprise" for planName and -1 for everything else.
-          sed -i 's/getValue<T extends keyof FeatureReturnType>(feature: T): FeatureReturnType\[T\] {/getValue<T extends keyof FeatureReturnType>(feature: T): FeatureReturnType[T] { if (feature === "planName") return "Enterprise" as FeatureReturnType[T]; return -1 as FeatureReturnType[T]; \/\//' "$TARGET_FILE"
-          
-          echo "Patch applied successfully via Function Hijack."
-
       # --- 3. BUILD: Set up environment and build app ---
       - name: Set up pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@v4
         with:
-          version: 10.18.3 
+          version: 12.3.4 
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 22 
+          node-version: 24 
           cache: 'pnpm'
+
+      - name: Install native build tooling
+        run: npm install --global node-gyp
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -226,6 +213,5 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            NODE_VERSION=22.21.0
             N8N_VERSION=${{ steps.meta.outputs.version }}
             N8N_RELEASE_TYPE=stable
