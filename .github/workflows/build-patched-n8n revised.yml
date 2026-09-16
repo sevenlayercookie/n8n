@@ -165,14 +165,14 @@ jobs:
 
       # --- 3. BUILD: Set up environment and build app ---
       - name: Set up pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@v4
         with:
-          version: 10.18.3 
+          version: 12.3.4 
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22 
+          node-version: 26.5.1 
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -226,6 +226,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            NODE_VERSION=22.21.0
+            NODE_VERSION=26.7.0
             N8N_VERSION=${{ steps.meta.outputs.version }}
             N8N_RELEASE_TYPE=stable
